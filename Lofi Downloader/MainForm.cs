@@ -17,6 +17,7 @@ namespace Lofi_Downloader
 	{
 		// field
 		LofiParser lofiParser;
+		string saveFolder;
 
 		// constructor
 		public MainForm()
@@ -44,6 +45,11 @@ namespace Lofi_Downloader
 				gettingImageProgressBar.Value++;
 				gettingImageLabel.Text = ("( " + gettingImageProgressBar.Value + " / " + gettingImageProgressBar.Maximum + " )");
 			};
+			lofiParser.DownloadImagesCompleted += (sender, e) =>
+			{
+				MessageBox.Show("Download Complete!");
+				Process.Start(saveFolder);
+			};
 		}
 
 		// event handler methods
@@ -53,7 +59,7 @@ namespace Lofi_Downloader
 			{
 				lofiParser.PageUrl = textBox1.Text;
 			}
-			catch(ArgumentException ex)
+			catch (ArgumentException ex)
 			{
 				MessageBox.Show(ex.Message);
 				return;
@@ -66,7 +72,7 @@ namespace Lofi_Downloader
 			gettingImageProgressBar.Value = 0;
 			allProgressBar.Value = 0;
 			thisProgressBar.Value = 0;
-			
+
 			gettingImageLabel.Text = ("( 0 / " + gettingImageProgressBar.Maximum + " )");
 			allProgressLabel.Text = ("( 0 / " + allProgressBar.Maximum + " )");
 
@@ -79,19 +85,14 @@ namespace Lofi_Downloader
 			folderBrowserDialog.Description = "Select folder!";
 			if(folderBrowserDialog.ShowDialog() == DialogResult.OK)
 			{
+				saveFolder = folderBrowserDialog.SelectedPath;
 				Task task = lofiParser.DownloadImages(folderBrowserDialog.SelectedPath);
 			}
 		}
 	}
 
-	class HtmlParser
+	static class HtmlParser
 	{
-		// no constructor
-		private HtmlParser()
-		{
-
-		}
-
 		// private method
 		private static string getBody(string html)
 		{
@@ -112,10 +113,14 @@ namespace Lofi_Downloader
 		}
 
 		// public methods
-		public static string GetHTML(string url)
+		public static bool IsHtmlCode(this string html)
+		{
+			return html.Contains("<!doctype html") || html.Contains("<!DOCTYPE html");
+		}
+		public static string GetHtml(string url)
 		{
 			string html;
-			
+
 			HttpWebResponse response = (HttpWebResponse)WebRequest.CreateHttp(url).GetResponse();
 
 			// 응답이 OK면
@@ -210,7 +215,9 @@ namespace Lofi_Downloader
 				pageUrl = value;
 				if (IsLofi)
 				{
-					string element = HtmlParser.GetElementByTag(HtmlParser.GetHTML(value), "a");
+					string html = HtmlParser.GetHtml(value);
+					if(!html.IsHtmlCode()) throw new ArgumentException("This page wasn't written in html. : " + html);
+					string element = HtmlParser.GetElementByTag(html, "a");
 					thumbNail = HtmlParser.GetImageLink(element);
 					firstPage = HtmlParser.GetAttribute(element, "href");
 				}
@@ -223,7 +230,7 @@ namespace Lofi_Downloader
 		public int PageCount { get {
 				if (firstPage != null)
 				{
-					string html = HtmlParser.GetHTML(firstPage);
+					string html = HtmlParser.GetHtml(firstPage);
 					string trElement = HtmlParser.GetElementByTag(html, "tr");
 					string temp = trElement.Substring(trElement.IndexOf("<td", trElement.IndexOf("<td") + 1));
 					string tdElement = HtmlParser.GetElementByTag(temp, "td");
@@ -240,6 +247,7 @@ namespace Lofi_Downloader
 		// events
 		public event EventHandler GettingImageProgressStart;
 		public event EventHandler GettingImageProgressChanged;
+		public event EventHandler DownloadImagesCompleted; 
 
 		// constructor
 		public LofiParser()
@@ -248,7 +256,7 @@ namespace Lofi_Downloader
 		}
 
 		// private methods
-		private string[] getImageArray()
+		private string[] getImages()
 		{
 			List<string> list = new List<string>();
 			string thisPage = firstPage;
@@ -257,7 +265,7 @@ namespace Lofi_Downloader
 			GettingImageProgressStart?.Invoke(this, EventArgs.Empty); 
 			while (!thisPage.Equals(prevPage))
 			{
-				string html = HtmlParser.GetHTML(thisPage);
+				string html = HtmlParser.GetHtml(thisPage);
 				string element = HtmlParser.GetElementByTag(html, "a");
 
 				list.Add(HtmlParser.GetImageLink(element));
@@ -282,12 +290,11 @@ namespace Lofi_Downloader
 		// public method
 		public async Task DownloadImages(string path)
 		{
-			foreach (string s in getImageArray())
+			foreach (string s in getImages())
 			{
 				await downloadImage(s, path);
 			}
-			MessageBox.Show("Download Complete!");
-			Process.Start(path);
+			DownloadImagesCompleted?.Invoke(this, EventArgs.Empty);
 		}
 	}
 }
