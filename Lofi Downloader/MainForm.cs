@@ -15,43 +15,49 @@ namespace Lofi_Downloader
 {
 	public partial class MainForm : Form
 	{
-		WebClient webClient;
-		string firstPage;
-		string thumbNail;
-		int pageCount;
+		LofiParser lofiParser;
 
 		public MainForm()
 		{
 			InitializeComponent();
 
-			webClient = new WebClient();
-			webClient.DownloadFileCompleted += (sender, e) =>
+			lofiParser = new LofiParser();
+			lofiParser.WebClient.DownloadFileCompleted += (sender, e) =>
 			{
 				allProgressBar.Value++;
 				allProgressLabel.Text = ("( " + allProgressBar.Value + " / " + allProgressBar.Maximum + " )");
 			};
-			webClient.DownloadProgressChanged += (sender, e) =>
+			lofiParser.WebClient.DownloadProgressChanged += (sender, e) =>
 			{
 				thisProgressBar.Value = e.ProgressPercentage;
-				thisProgressLabel.Text = ("( "+ e.ProgressPercentage+" % )");
+				thisProgressLabel.Text = ("( " + e.ProgressPercentage + " % )");
+			};
+
+			lofiParser.GettingImageProgressStart += (sender, e) =>
+			{
+				gettingImageProgressBar.Value = 0;
+			};
+			lofiParser.GettingImageProgressChanged += (sender, e) =>
+			{
+				gettingImageProgressBar.Value++;
+				gettingImageLabel.Text = ("( " + gettingImageProgressBar.Value + " / " + gettingImageProgressBar.Maximum + " )");
 			};
 		}
-	
+
 		private void findButton_Click(object sender, EventArgs e)
 		{
 			gettingImageProgressBar.Value = 0;
 			allProgressBar.Value = 0;
 			thisProgressBar.Value = 0;
 
-			string html = getHTML(textBox1.Text);
-			string element = getElementByTag(html, "a");
+			string html = HtmlParser.GetHTML(textBox1.Text);
+			string element = HtmlParser.GetElementByTag(html, "a");
+			
+			pictureBox1.ImageLocation = HtmlParser.GetImageLink(element);
 
-			thumbNail = getImageLink(element);
-			pictureBox1.ImageLocation = thumbNail;
+			lofiParser.FirstPageUrl = HtmlParser.GetAttribute(element, "href");
 
-			firstPage = getAttribute(element, "href");
-
-			int max = getPageCount();
+			int max = lofiParser.PageCount;
 			gettingImageProgressBar.Maximum = max;
 			allProgressBar.Maximum = max;
 
@@ -61,41 +67,24 @@ namespace Lofi_Downloader
 			MessageBox.Show("Finding Success!");
 		}
 
-		private int getPageCount()
+		private void downloadButton_Click(object sender, EventArgs e)
 		{
-			string html = getHTML(firstPage);
-			string trElement = getElementByTag(html, "tr");
-			string temp = trElement.Substring(trElement.IndexOf("<td", trElement.IndexOf("<td") + 1));
-			string tdElement = getElementByTag(temp, "td");
-			
-			return pageCount = Convert.ToInt32(tdElement.Substring(tdElement.LastIndexOf('/') + 1));
-		}
-
-		private string[] getImageArray()
-		{
-			List<string> list = new List<string>();
-			string thisPage = firstPage;
-			string prevPage = null;
-
-			gettingImageProgressBar.Value = 0;
-			while (!thisPage.Equals(prevPage))
+			folderBrowserDialog.Description = "Select folder!";
+			if(folderBrowserDialog.ShowDialog() == DialogResult.OK)
 			{
-				string html = getHTML(thisPage);
-				string element = getElementByTag(html, "a");
-
-				list.Add(getImageLink(element));
-
-				prevPage = thisPage;
-				thisPage = getAttribute(element, "href");
-
-				gettingImageProgressBar.Value++;
-				gettingImageLabel.Text = ("( " + gettingImageProgressBar.Value + " / " + gettingImageProgressBar.Maximum + " )");
+				Task task = lofiParser.DownloadImages(folderBrowserDialog.SelectedPath);
 			}
+		}
+	}
 
-			return list.ToArray();
+	class HtmlParser
+	{
+		private HtmlParser()
+		{
+
 		}
 
-		private string getHTML(string url)
+		public static string GetHTML(string url)
 		{
 			string html;
 
@@ -136,7 +125,15 @@ namespace Lofi_Downloader
 			}
 		}
 
-		private string getBody(string html)
+		public static string GetHTMLFastly(string url)
+		{
+			using (WebClient webClient = new WebClient())
+			{
+				return webClient.DownloadString(url);
+			}
+		}
+
+		private static string getBody(string html)
 		{
 			string temp;
 
@@ -153,18 +150,18 @@ namespace Lofi_Downloader
 				return html;
 			}
 		}
-		
-		private string getElementByTag(string html, string tag)
+
+		public static string GetElementByTag(string html, string tag)
 		{
 			string temp;
 			string body = getBody(html);
-			
+
 			if (body.Contains("<" + tag))
 			{
 				int start = body.IndexOf("<" + tag);
 				int end = body.IndexOf("</" + tag + ">");
 				temp = body.Substring(start, end - start);
-				
+
 				return temp;
 			}
 			else
@@ -173,14 +170,14 @@ namespace Lofi_Downloader
 			}
 		}
 
-		private string getAttribute(string element, string attribute)
+		public static string GetAttribute(string element, string attribute)
 		{
 			string temp = element.Substring(element.IndexOf(attribute));
 
 			return temp.Substring(temp.IndexOf('"') + 1, temp.IndexOf('"', temp.IndexOf('"') + 1) - attribute.Length - 2); ;
 		}
 
-		private string getImageLink(string element)
+		public static string GetImageLink(string element)
 		{
 			if (element.Contains("<img"))
 			{
@@ -196,17 +193,79 @@ namespace Lofi_Downloader
 				return "nothing";
 			}
 		}
+	}
 
-		private void downloadButton_Click(object sender, EventArgs e)
+	class LofiParser
+	{
+		// fields
+		WebClient webClient;
+		string firstPage;
+		int pageCount;
+
+		// properties
+		public WebClient WebClient { get { return webClient; } }
+		public string FirstPageUrl { set { firstPage = value; } }
+		public int PageCount { get {
+				if (firstPage != null)
+				{
+					string html = HtmlParser.GetHTML(firstPage);
+					string trElement = HtmlParser.GetElementByTag(html, "tr");
+					string temp = trElement.Substring(trElement.IndexOf("<td", trElement.IndexOf("<td") + 1));
+					string tdElement = HtmlParser.GetElementByTag(temp, "td");
+
+					return pageCount = Convert.ToInt32(tdElement.Substring(tdElement.LastIndexOf('/') + 1));
+				}
+				else
+				{
+					throw new NullReferenceException("FirstPage is null!");
+				}
+			} }
+
+		// events
+		public event EventHandler GettingImageProgressStart;
+		public event EventHandler GettingImageProgressChanged;
+
+		// constructor
+		public LofiParser()
 		{
-			folderBrowserDialog.Description = "Select folder!";
-			if(folderBrowserDialog.ShowDialog() == DialogResult.OK)
-			{
-				Task task = downloadTask(folderBrowserDialog.SelectedPath);
-			}
+			webClient = new WebClient();
 		}
 
-		private async Task downloadTask(string path)
+		// private methods
+		private string[] getImageArray()
+		{
+			List<string> list = new List<string>();
+			string thisPage = firstPage;
+			string prevPage = null;
+
+			GettingImageProgressStart?.Invoke(this, EventArgs.Empty); 
+			//gettingImageProgressBar.Value = 0;
+			while (!thisPage.Equals(prevPage))
+			{
+				string html = HtmlParser.GetHTML(thisPage);
+				string element = HtmlParser.GetElementByTag(html, "a");
+
+				list.Add(HtmlParser.GetImageLink(element));
+
+				prevPage = thisPage;
+				thisPage = HtmlParser.GetAttribute(element, "href");
+				
+				GettingImageProgressChanged?.Invoke(this, EventArgs.Empty);
+			}
+
+			return list.ToArray();
+		}
+		private async Task downloadImage(string url, string path)
+		{
+			string fileName = Path.Combine(path, url.Substring(url.LastIndexOf('/') + 1));
+
+			await webClient.DownloadFileTaskAsync(new Uri(url), fileName);
+
+			webClient.Dispose();
+		}
+
+		// public methods
+		public async Task DownloadImages(string path)
 		{
 			foreach (string s in getImageArray())
 			{
@@ -216,13 +275,5 @@ namespace Lofi_Downloader
 			Process.Start(path);
 		}
 
-		private async Task downloadImage(string url, string path)
-		{
-			string fileName = Path.Combine(path, url.Substring(url.LastIndexOf('/') + 1));
-
-			await webClient.DownloadFileTaskAsync(new Uri(url), fileName);
-			
-			webClient.Dispose();
-		}
 	}
 }
