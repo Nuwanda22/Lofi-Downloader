@@ -15,8 +15,10 @@ namespace Lofi_Downloader
 {
 	public partial class MainForm : Form
 	{
+		// field
 		LofiParser lofiParser;
 
+		// constructor
 		public MainForm()
 		{
 			InitializeComponent();
@@ -44,29 +46,34 @@ namespace Lofi_Downloader
 			};
 		}
 
+		// event handler methods
 		private void findButton_Click(object sender, EventArgs e)
 		{
-			gettingImageProgressBar.Value = 0;
-			allProgressBar.Value = 0;
-			thisProgressBar.Value = 0;
-
-			string html = HtmlParser.GetHTML(textBox1.Text);
-			string element = HtmlParser.GetElementByTag(html, "a");
-			
-			pictureBox1.ImageLocation = HtmlParser.GetImageLink(element);
-
-			lofiParser.FirstPageUrl = HtmlParser.GetAttribute(element, "href");
+			try
+			{
+				lofiParser.PageUrl = textBox1.Text;
+			}
+			catch(ArgumentException ex)
+			{
+				MessageBox.Show(ex.Message);
+				return;
+			}
 
 			int max = lofiParser.PageCount;
 			gettingImageProgressBar.Maximum = max;
 			allProgressBar.Maximum = max;
 
-			gettingImageLabel.Text = ("( " + 0 + " / " + gettingImageProgressBar.Maximum + " )");
-			allProgressLabel.Text = ("( " + 0 + " / " + allProgressBar.Maximum + " )");
+			gettingImageProgressBar.Value = 0;
+			allProgressBar.Value = 0;
+			thisProgressBar.Value = 0;
+			
+			gettingImageLabel.Text = ("( 0 / " + gettingImageProgressBar.Maximum + " )");
+			allProgressLabel.Text = ("( 0 / " + allProgressBar.Maximum + " )");
+
+			pictureBox1.ImageLocation = lofiParser.ThumbNailImage;
 
 			MessageBox.Show("Finding Success!");
 		}
-
 		private void downloadButton_Click(object sender, EventArgs e)
 		{
 			folderBrowserDialog.Description = "Select folder!";
@@ -79,21 +86,43 @@ namespace Lofi_Downloader
 
 	class HtmlParser
 	{
+		// no constructor
 		private HtmlParser()
 		{
 
 		}
 
+		// private method
+		private static string getBody(string html)
+		{
+			string temp;
+
+			if (html.Contains("<body"))
+			{
+				int start = html.IndexOf("<body");
+				int end = html.IndexOf("</body>");
+				temp = html.Substring(start, end - start);
+
+				return temp;
+			}
+			else
+			{
+				return html;
+			}
+		}
+
+		// public methods
 		public static string GetHTML(string url)
 		{
 			string html;
-
-			HttpWebRequest request = WebRequest.CreateHttp(url);
-			HttpWebResponse response = (HttpWebResponse)request.GetResponse();
+			
+			HttpWebResponse response = (HttpWebResponse)WebRequest.CreateHttp(url).GetResponse();
 
 			// 응답이 OK면
 			if (response.StatusCode == HttpStatusCode.OK)
 			{
+				if (response.ResponseUri.AbsoluteUri.Equals("http://www.warning.or.kr/")) throw new ArgumentException("You can't be accepted this page!");
+
 				// 수신 스트림을 만들고
 				Stream receiveStream = response.GetResponseStream();
 				StreamReader readStream;
@@ -124,33 +153,6 @@ namespace Lofi_Downloader
 				throw new ArgumentException("Http Status Code : " + response.StatusCode.ToString());
 			}
 		}
-
-		public static string GetHTMLFastly(string url)
-		{
-			using (WebClient webClient = new WebClient())
-			{
-				return webClient.DownloadString(url);
-			}
-		}
-
-		private static string getBody(string html)
-		{
-			string temp;
-
-			if (html.Contains("<body"))
-			{
-				int start = html.IndexOf("<body");
-				int end = html.IndexOf("</body>");
-				temp = html.Substring(start, end - start);
-
-				return temp;
-			}
-			else
-			{
-				return html;
-			}
-		}
-
 		public static string GetElementByTag(string html, string tag)
 		{
 			string temp;
@@ -169,14 +171,12 @@ namespace Lofi_Downloader
 				return null;
 			}
 		}
-
 		public static string GetAttribute(string element, string attribute)
 		{
 			string temp = element.Substring(element.IndexOf(attribute));
 
 			return temp.Substring(temp.IndexOf('"') + 1, temp.IndexOf('"', temp.IndexOf('"') + 1) - attribute.Length - 2); ;
 		}
-
 		public static string GetImageLink(string element)
 		{
 			if (element.Contains("<img"))
@@ -190,7 +190,7 @@ namespace Lofi_Downloader
 			}
 			else
 			{
-				return "nothing";
+				return null;
 			}
 		}
 	}
@@ -199,12 +199,27 @@ namespace Lofi_Downloader
 	{
 		// fields
 		WebClient webClient;
+		string pageUrl;
 		string firstPage;
+		string thumbNail;
 		int pageCount;
 
 		// properties
 		public WebClient WebClient { get { return webClient; } }
-		public string FirstPageUrl { set { firstPage = value; } }
+		public string PageUrl { set {
+				pageUrl = value;
+				if (IsLofi)
+				{
+					string element = HtmlParser.GetElementByTag(HtmlParser.GetHTML(value), "a");
+					thumbNail = HtmlParser.GetImageLink(element);
+					firstPage = HtmlParser.GetAttribute(element, "href");
+				}
+				else
+				{
+					throw new ArgumentException("This page is not Lofi.");
+				}
+			} }
+		public string ThumbNailImage { get { return thumbNail; } }
 		public int PageCount { get {
 				if (firstPage != null)
 				{
@@ -220,6 +235,7 @@ namespace Lofi_Downloader
 					throw new NullReferenceException("FirstPage is null!");
 				}
 			} }
+		public bool IsLofi { get { return pageUrl.Contains("http://lofi.e-hentai.org/"); } }
 
 		// events
 		public event EventHandler GettingImageProgressStart;
@@ -239,7 +255,6 @@ namespace Lofi_Downloader
 			string prevPage = null;
 
 			GettingImageProgressStart?.Invoke(this, EventArgs.Empty); 
-			//gettingImageProgressBar.Value = 0;
 			while (!thisPage.Equals(prevPage))
 			{
 				string html = HtmlParser.GetHTML(thisPage);
@@ -264,7 +279,7 @@ namespace Lofi_Downloader
 			webClient.Dispose();
 		}
 
-		// public methods
+		// public method
 		public async Task DownloadImages(string path)
 		{
 			foreach (string s in getImageArray())
@@ -274,6 +289,5 @@ namespace Lofi_Downloader
 			MessageBox.Show("Download Complete!");
 			Process.Start(path);
 		}
-
 	}
 }
