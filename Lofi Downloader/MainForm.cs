@@ -18,6 +18,7 @@ namespace Lofi_Downloader
 		// field
 		LofiParser lofiParser;
 		string saveFolder;
+		bool IsDownloading;
 
 		// constructor
 		public MainForm()
@@ -50,6 +51,14 @@ namespace Lofi_Downloader
 				MessageBox.Show("Download Complete!");
 				Process.Start(saveFolder);
 			};
+
+			folderBrowserDialog.Description = "Select folder!";
+		}
+
+		// enum
+		enum ProgressStatus
+		{
+			GettingImages, DownloadingImges
 		}
 
 		// event handler methods
@@ -76,17 +85,43 @@ namespace Lofi_Downloader
 			gettingImageLabel.Text = ("( 0 / " + gettingImageProgressBar.Maximum + " )");
 			allProgressLabel.Text = ("( 0 / " + allProgressBar.Maximum + " )");
 
+			gettingImageLabel.Visible = true;
+			allProgressLabel.Visible = true;
+			thisProgressLabel.Visible = true;
+
 			pictureBox1.ImageLocation = lofiParser.ThumbNailImage;
 
 			MessageBox.Show("Finding Success!");
 		}
-		private void downloadButton_Click(object sender, EventArgs e)
+		private async void downloadButton_Click(object sender, EventArgs e)
 		{
-			folderBrowserDialog.Description = "Select folder!";
-			if(folderBrowserDialog.ShowDialog() == DialogResult.OK)
+			Button button = sender as Button;
+			Task task;
+
+			if (lofiParser.CanDownload)
 			{
-				saveFolder = folderBrowserDialog.SelectedPath;
-				Task task = lofiParser.DownloadImages(folderBrowserDialog.SelectedPath);
+				if (!IsDownloading)
+				{
+					if (folderBrowserDialog.ShowDialog() == DialogResult.OK)
+					{
+						button.Text = "Pause";
+						IsDownloading = true;
+
+						saveFolder = folderBrowserDialog.SelectedPath;
+						task = lofiParser.DownloadImages(folderBrowserDialog.SelectedPath);
+					}
+				}
+				else
+				{
+					
+
+					button.Text = "Download";
+					IsDownloading = false;
+				}
+			}
+			else
+			{
+				MessageBox.Show("Please Find, First!");
 			}
 		}
 	}
@@ -208,6 +243,7 @@ namespace Lofi_Downloader
 		string firstPage;
 		string thumbNail;
 		int pageCount;
+		bool canDownload;
 
 		// properties
 		public WebClient WebClient { get { return webClient; } }
@@ -220,6 +256,8 @@ namespace Lofi_Downloader
 					string element = HtmlParser.GetElementByTag(html, "a");
 					thumbNail = HtmlParser.GetImageLink(element);
 					firstPage = HtmlParser.GetAttribute(element, "href");
+
+					canDownload = true;
 				}
 				else
 				{
@@ -243,6 +281,7 @@ namespace Lofi_Downloader
 				}
 			} }
 		public bool IsLofi { get { return pageUrl.Contains("http://lofi.e-hentai.org/"); } }
+		public bool CanDownload { get { return canDownload; } }
 
 		// events
 		public event EventHandler GettingImageProgressStart;
@@ -290,7 +329,9 @@ namespace Lofi_Downloader
 		// public method
 		public async Task DownloadImages(string path)
 		{
-			foreach (string s in getImages())
+			string[] temp = getImages();
+
+			foreach (string s in temp)
 			{
 				await downloadImage(s, path);
 			}
